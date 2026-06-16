@@ -210,7 +210,7 @@ public class FlowValidator implements ConstraintValidator<FlowValidation, Flow> 
         // Expand FORMs so children enter the graph keyed by their dotted path. A child referencing a sibling
         // must write the full dotted path (e.g. 'environment.data_center'); a bare ref resolves to no node and
         // is rejected below ("depends on a non-existent input"), so the no-auto-rewrite contract fails loudly.
-        for (Input<?> input : Input.expandToLeaves(flow.getInputs())) {
+        for (Input<?> input : flow.resolvableInputs()) {
             graph.putIfAbsent(input.getId(), new ArrayList<>());
             if (input.getDependsOn() != null && !ListUtils.isEmpty(input.getDependsOn().inputs())) {
                 graph.get(input.getId()).addAll(input.getDependsOn().inputs());
@@ -250,7 +250,7 @@ public class FlowValidator implements ConstraintValidator<FlowValidation, Flow> 
             && !ListUtils.emptyOnNull(value.getInputs()).isEmpty()) {
             // Find inputs without defaults (expanded to dotted leaf paths; schedules provide values keyed by
             // the same dotted path, matching how FlowInputOutput resolves them).
-            Set<String> inputsWithoutDefaults = Input.expandToLeaves(value.getInputs()).stream()
+            Set<String> inputsWithoutDefaults = value.resolvableInputs().stream()
                 .filter(input -> input.getDefaults() == null)
                 .map(Data::getId)
                 .collect(Collectors.toSet());

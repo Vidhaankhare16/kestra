@@ -40,8 +40,8 @@ public class FlowToolSchemaMapper {
                 a.returnDirect()
             ))
             .inputSchema(buildToolInputSchema(
-                    // Expand FORM inputs so MCP schema keys are the dotted leaf paths; FORM never reaches convert().
-                    Input.expandToLeaves(ListUtils.emptyOnNull(flow.getInputs()))
+                    // FORM inputs are expanded to dotted leaf paths; FORM never reaches convert().
+                    flow.resolvableInputs()
                 )
             )
             .outputSchema(

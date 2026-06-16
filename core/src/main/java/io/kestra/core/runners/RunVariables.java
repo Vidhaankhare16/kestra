@@ -417,7 +417,7 @@ public final class RunVariables {
                         final Secret secret = new Secret(secretKey, logger);
                         // Expand FORM inputs so SECRET children are decoded by their dotted path; decodeInput already
                         // navigates the nested inputs map for dotted ids.
-                        for (Input<?> input : Input.expandToLeaves(flow.getInputs())) {
+                        for (Input<?> input : flow.resolvableInputs()) {
                             if (input instanceof SecretInput) {
                                 decodeInput(secret, input.getId(), inputs);
                             }
@@ -431,7 +431,7 @@ public final class RunVariables {
 
                     // we add default inputs value from the flow if not already set, this will be useful for triggers.
                     // FORM inputs are expanded to dotted leaves so a grouped child's default nests under its form key.
-                    Input.expandToLeaves(flow.getInputs()).stream()
+                    flow.resolvableInputs().stream()
                         .filter(input -> input.getDefaults() != null && !containsNested(inputs, input.getId()))
                         .forEach(input ->
                         {

@@ -425,7 +425,7 @@ public class FlowInputOutput {
         // otherwise cause an exception if a Pebble expression is involved.
         // FORM inputs are expanded to dotted leaves first, and defaults are injected into the flat map
         // before nesting so they end up under the form key (e.g. inputs.environment.region).
-        List<Input<?>> inputs = Input.expandToLeaves(Optional.ofNullable(flow).map(FlowInterface::getInputs).orElse(List.of()));
+        List<Input<?>> inputs = flow == null ? List.of() : flow.resolvableInputs();
         for (Input<?> input : inputs) {
             if (input.getDefaults() != null && !flatInputs.containsKey(input.getId())) {
                 flatInputs.put(input.getId(), null);

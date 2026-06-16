@@ -16,7 +16,6 @@ import io.kestra.core.metrics.MetricRegistry;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.flows.FlowInterface;
-import io.kestra.core.models.flows.Input;
 import io.kestra.core.models.flows.Type;
 import io.kestra.core.models.property.PropertyContext;
 import io.kestra.core.models.tasks.Task;
@@ -256,7 +255,7 @@ public class RunContextFactory {
         }
 
         // FORM inputs are expanded to dotted leaves so a SECRET grouped under a form is masked by its dotted path.
-        return Input.expandToLeaves(flow.getInputs()).stream()
+        return flow.resolvableInputs().stream()
             .filter(input -> input.getType() == Type.SECRET)
             .map(input -> input.getId()).toList();
     }
