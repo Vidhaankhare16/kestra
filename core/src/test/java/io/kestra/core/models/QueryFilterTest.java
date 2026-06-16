@@ -214,6 +214,7 @@ public class QueryFilterTest {
             buildQueryFiltersForOperations(
                 Field.LEVEL, Resource.LOG,
                 Set.of(
+                    Op.EQUALS,
                     Op.GREATER_THAN_OR_EQUAL_TO,
                     Op.LESS_THAN_OR_EQUAL_TO
                 )
@@ -1000,7 +1001,6 @@ public class QueryFilterTest {
             buildQueryFiltersForOperations(
                 Field.LEVEL, Resource.LOG,
                 Set.of(
-                    Op.EQUALS,
                     Op.NOT_EQUALS,
                     Op.GREATER_THAN,
                     Op.LESS_THAN,
