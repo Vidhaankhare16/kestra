@@ -300,7 +300,8 @@
     import {useI18n} from "vue-i18n"
     import debounce from "lodash/debounce"
     import {useEditorBindings} from "../../composables/useEditorBindings"
-    import {normalize, flattenInputs, formChildName, buildWizardSteps, executeFormValuesStorageKey, type InputType, type WizardStep} from "../../utils/inputs"
+    import {useInputsWizard} from "../../composables/useInputsWizard"
+    import {normalize, flattenInputs, type InputType} from "../../utils/inputs"
     import {inputsToFormData} from "../../utils/submitTask"
     import DeleteOutlineIcon from "vue-material-design-icons/DeleteOutline.vue"
     import PencilIcon from "vue-material-design-icons/Pencil.vue"
@@ -391,123 +392,36 @@
     })
 
     // ---- FORM wizard ----
-    // One step per top-level FORM (titled by its displayName); a contiguous run of ungrouped
-    // top-level inputs forms its own step (document order preserved); a final recap step.
-    const hasForms = computed(() => (props.initialInputs ?? []).some(i => i.type === "FORM"))
-    const isWizard = computed(() => props.mode === "wizard" && hasForms.value)
-    // Per-flow localStorage key: persists in-progress values across Back/Next and page reload,
-    // cleared on unmount (dialog discard or execution creation) so a fresh open starts blank.
-    const formValuesStorageKey = computed(() => isWizard.value ? executeFormValuesStorageKey(props.flow) : undefined)
-
-    const steps = computed<WizardStep[]>(() => isWizard.value ? buildWizardSteps(props.initialInputs as any) : [])
-
-    const currentStep = ref(0)
-    const current = computed<WizardStep | undefined>(() => steps.value[currentStep.value])
-    const recapIndex = computed(() => steps.value.length - 1)
-    const returnToRecap = ref(false)
-    const navLoading = ref(false)
-    // Only swap the Next label to the loading message once the validate round-trip is slow
-    // enough to notice (>500ms). A fast validate shows just the brief spinner — no jarring label flash.
-    const showComputingLabel = ref(false)
-
-    const isOnRecap = computed(() => isWizard.value && current.value?.kind === "recap")
-
-    const visibleInputs = computed<InputMetaData[]>(() => {
-        if (!isWizard.value) return inputsMetaData.value
-        const step = current.value
-        if (!step || step.kind === "recap") return []
-        return (step.leafIds ?? [])
-            .map(id => inputsMetaData.value.find(m => m.id === id))
-            .filter((m): m is InputMetaData => m !== undefined)
+    // A flow whose inputs contain a FORM renders as a multi-step Next/Back wizard; otherwise this
+    // degrades to flat mode. The composable owns the nav/recap/persistence as well as
+    // visibleInputs/inputLabel (which also drive the flat form). Destructured with identical names so
+    // the template needs no changes; the refs/computeds keep their reactivity through the destructure.
+    const {
+        isWizard,
+        current,
+        currentStep,
+        returnToRecap,
+        navLoading,
+        showComputingLabel,
+        isOnRecap,
+        visibleInputs,
+        inputLabel,
+        recapSections,
+        recapDisplayValue,
+        goNext,
+        goBack,
+        editStep,
+        restorePersistedValues,
+        persistValues,
+    } = useInputsWizard({
+        props,
+        inputsMetaData,
+        inputsValues,
+        multiSelectInputs,
+        inputsValidated,
+        validateInputs,
+        onRecapChange: (val) => emit("update:onRecap", val),
     })
-
-    // Owning FORM ids: from the FORM tree (wizard) and/or formGroups keys (EE Apps reconstruction).
-    // Used to strip the form prefix off a child's dotted id when it has no explicit displayName.
-    const formIds = computed<string[]>(() => {
-        const fromTree = (props.initialInputs ?? []).filter(i => i.type === "FORM").map(i => i.id)
-        return props.formGroups ? [...fromTree, ...Object.keys(props.formGroups)] : fromTree
-    })
-
-    // Label for a leaf: its displayName, else the bare child name (form prefix stripped) so a
-    // FORM child without a displayName shows `a` rather than the dotted `form.a`.
-    function inputLabel(input: InputMetaData): string {
-        return input.displayName || formChildName(input.id, formIds.value)
-    }
-
-    // Recap: every non-recap step paired with its index (for the Edit button to jump back).
-    const recapSections = computed(() =>
-        steps.value
-            .map((step, index) => ({step, index}))
-            .filter(({step}) => step.kind !== "recap")
-            .map(({step, index}) => ({
-                index,
-                title: step.title || t("inputs"),
-                fields: (step.leafIds ?? [])
-                    .map(id => inputsMetaData.value.find(m => m.id === id))
-                    .filter((m): m is InputMetaData => m !== undefined),
-            })),
-    )
-
-    function recapDisplayValue(input: InputMetaData): string {
-        if (input.type === "SECRET") return "••••••••"
-        const raw = input.type === "MULTISELECT" ? multiSelectInputs[input.id] : inputsValues[input.id]
-        if (raw === undefined || raw === null || raw === "") return "—"
-        if (raw instanceof File) return raw.name
-        if (typeof raw === "object") return JSON.stringify(raw)
-        return String(raw)
-    }
-
-    function stepIsValid(step: WizardStep | undefined): boolean {
-        if (!step || step.kind === "recap") return true
-        return (step.leafIds ?? []).every(id => {
-            const meta = inputsMetaData.value.find(m => m.id === id)
-            if (!meta) return true // not in the validate response -> disabled via dependsOn, skip
-            if (meta.errors && meta.errors.length > 0) return false
-            if (meta.required === false) return true
-            const val = meta.type === "MULTISELECT" ? multiSelectInputs[id] : inputsValues[id]
-            return !(val === undefined || val === null || val === "" || (Array.isArray(val) && val.length === 0))
-        })
-    }
-
-    async function goNext(): Promise<void> {
-        const step = current.value
-        if (!step || step.kind === "recap") return
-        navLoading.value = true
-        // Defer the label swap so a fast round-trip never flashes it (see showComputingLabel).
-        const labelTimer = setTimeout(() => { showComputingLabel.value = true }, 500)
-        try {
-            await validateInputs()
-        } finally {
-            // always clear the loading state, even if the validate round-trip throws, so the
-            // Next button never gets stuck spinning on the loading message.
-            clearTimeout(labelTimer)
-            showComputingLabel.value = false
-            navLoading.value = false
-        }
-        // reveal any per-field errors for this step now (bypass the 2s onChange delay)
-        ;(step.leafIds ?? []).forEach(id => inputsValidated.value.add(id))
-        if (!stepIsValid(step)) return
-        if (returnToRecap.value) {
-            currentStep.value = recapIndex.value
-            returnToRecap.value = false
-        } else {
-            currentStep.value++
-        }
-    }
-
-    function goBack(): void {
-        if (currentStep.value > 0) {
-            currentStep.value--
-            returnToRecap.value = false
-        }
-    }
-
-    function editStep(index: number): void {
-        returnToRecap.value = true
-        currentStep.value = index
-    }
-
-    watch(isOnRecap, (val) => emit("update:onRecap", val), {immediate: true})
 
     // Methods
     function normalizeJSON(value: string): unknown {
@@ -893,14 +807,7 @@
     }
 
     // Wizard: restore in-progress values (e.g. after a page reload) before the first validate.
-    if (isWizard.value && formValuesStorageKey.value) {
-        try {
-            const stored = localStorage.getItem(formValuesStorageKey.value)
-            if (stored) {
-                Object.assign(inputsValues, JSON.parse(stored))
-            }
-        } catch { /* ignore corrupt storage */ }
-    }
+    restorePersistedValues()
 
     // Run initial validation and setup watcher
     validateInputs().then(() => {
@@ -914,9 +821,7 @@
                     debouncedValidation()
                     modelValue.value = {...inputsValues}
                     emit("update:modelValueNoDefault", inputsValuesWithNoDefault.value)
-                    if (isWizard.value && formValuesStorageKey.value) {
-                        localStorage.setItem(formValuesStorageKey.value, JSON.stringify({...inputsValues}))
-                    }
+                    persistValues()
                 }
                 previousInputsValues.value = JSON.parse(JSON.stringify(val))
             },
@@ -952,11 +857,6 @@
     onBeforeUnmount(() => {
         if (keyListener) {
             document.removeEventListener("keydown", keyListener)
-        }
-        // Clear persisted wizard values on dialog discard / after execution creation.
-        // A hard page reload does not run this hook, so reload-then-restore still works.
-        if (isWizard.value && formValuesStorageKey.value) {
-            localStorage.removeItem(formValuesStorageKey.value)
         }
     })
 
